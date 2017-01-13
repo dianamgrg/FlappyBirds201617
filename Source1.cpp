@@ -3,19 +3,23 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <vector>
+#include "Header1.hpp"
+#include "app.hpp"
+#include <stdexcept>
+
 using namespace std;
 using std::string;
+int hisc;
 
 bool InitEverything();
 bool InitSDL();
-bool CreateWindow();
-bool CreateRenderer();
-void SetupRenderer();
-void SetupRenderer2();
-void SetupRenderer3();
+bool CreateWindow1();
+bool CreateWindow3();
 
 bool SetupTTF(const std::string &fontName);
 SDL_Texture* SurfaceToTexture(SDL_Surface* surf);
+SDL_Texture* LoadTextureFromFile(SDL_Renderer *renderer, char const *fileName);
 void CreateTextTextures();
 
 void RenderMenu();
@@ -24,7 +28,7 @@ void RenderGame();
 void Menu();
 void Game();
 void Highscores();
-int hisc;
+void CloseEverything();
 
 TTF_Font* font_Title;
 TTF_Font* font_Options;
@@ -54,49 +58,263 @@ SDL_Rect hiscBR3;
 
 SDL_Rect windowRect = { SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1000, 500 };
 SDL_Window* window;
-SDL_Rect windowRect2 = { SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1000, 500 };
 SDL_Window* window2;
 SDL_Rect windowRect3 = { SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1000, 500 };
 SDL_Window* window3;
 SDL_Renderer* renderer;
 
-void CloseEverything();
-
-int main(int argc, char* args[])
+bool isSpacePressed()
 {
-	if (!InitEverything())
+	SDL_Event ev;
+	while (SDL_PollEvent(&ev) != 0)
+		if (ev.type == SDL_KEYDOWN)
+			if (ev.key.keysym.sym == SDLK_SPACE)
+				return true;
+	return false;
+}
+
+int Run();
+
+Application::Application()
+{
+	auto res = SDL_Init(SDL_INIT_EVERYTHING);
+	if (res != 0)
+		throw std::runtime_error(std::string("SDL_Init(SDL_INIT_EVERYTHING)") + SDL_GetError());
+	SDL_CreateWindowAndRenderer(Width, Height, SDL_WINDOW_BORDERLESS, &window, &renderer);
+	SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+	SDL_SetWindowPosition(window, 65, 126);
+}
+
+int Application::exec()
+{
+	for (;;)
 	{
-		cout << "ERROR" << '\n';
+		Application Game;
+		if (Game.exec() == 0)
+			break;
+	}
+	return 0;
+}
+
+Bird::Bird(SDL_Renderer *renderer):
+	renderer(renderer),
+	bird1(LoadTextureFromFile(renderer, "bird1.bmp")),
+	bird2(LoadTextureFromFile(renderer, "bird2.bmp"))
+{}
+
+Bird::~Bird()
+{
+	SDL_DestroyTexture(bird1);
+	SDL_DestroyTexture(bird2);
+}
+
+
+void Bird::draw()
+{
+	SDL_Rect r;
+	r.x = x - 64;
+	r.y = y - 64;
+	r.w = 128;
+	r.h = 128;
+	auto res = SDL_RenderCopyEx(renderer, SDL_GetTicks() % 300 > 150 ? bird1 : bird2, nullptr, &r, v * 50, nullptr, SDL_FLIP_NONE);
+	if (res != 0)
+		throw std::runtime_error(std::string("SDL_RenderCopy ") + SDL_GetError());
+}
+
+void Bird::tick(bool isSpacePressed)
+{
+	v -= isSpacePressed ? 0.003 : 0;
+	v += 0.001;
+	y += v;
+}
+
+Tube::Tube(SDL_Renderer *renderer, SDL_Texture *texture, int y, bool isUp) :
+	renderer(renderer),
+	texture(texture),
+	y(y),
+	isUp(isUp)
+{}
+
+void Tube::tick()
+{
+	x -= 0.25f;
+}
+
+void Tube::draw()
+{
+	if (!isUp)
+	{
+		SDL_Rect r;
+		r.x = x - 128;
+		r.y = y;
+		r.w = 256;
+		r.h = 720;
+		auto res = SDL_RenderCopyEx(renderer, texture, nullptr, &r, 0, nullptr, SDL_FLIP_NONE);
+		if (res != 0)
+			throw std::runtime_error(std::string("SDL_RenderCopy ") + SDL_GetError());
 	}
 	else
 	{
-		bool quit = false;
-		SDL_Event e;
-		while (!quit)
+		SDL_Rect r;
+		r.x = x - 128;
+		r.y = y - Application::Height;
+		r.w = 256;
+		r.h = 720;
+		auto res = SDL_RenderCopyEx(renderer, texture, nullptr, &r, 0, nullptr, SDL_FLIP_VERTICAL);
+		if (res != 0)
+			throw std::runtime_error(std::string("SDL_RenderCopy ") + SDL_GetError());
+	}
+
+}
+
+Game::Game(SDL_Renderer *renderer) :
+	renderer(renderer),
+	tubeTexture(LoadTextureFromFile(renderer, "tube.bmp")),
+	digitsTexture(LoadTextureFromFile(renderer, "digits.bmp")),
+	bird(renderer)
+{
+}
+
+Game::~Game()
+{
+	SDL_DestroyTexture(tubeTexture);
+	SDL_DestroyTexture(digitsTexture);
+}
+
+
+bool Game::tick(bool isSpacePressed)
+{
+	if (counter++ % 2000 == 0)
+	{
+		auto y = rand() % (Application::Height - 200 - 250 - 100) + 100;
+		tubeList.emplace_back(renderer, tubeTexture, y + 250, false);
+		tubeList.emplace_back(renderer, tubeTexture, y, true);
+	}
+	bird.tick(isSpacePressed);
+	SDL_Rect birdRect;
+	birdRect.x = bird.x - 114 / 2;
+	birdRect.y = bird.y - 94 / 2;
+	birdRect.w = 114;
+	birdRect.h = 94;
+	SDL_Rect res;
+	for (auto &tube : tubeList)
+	{
+		tube.tick();
+		SDL_Rect tubeRect;
+		tubeRect.x = tube.x - 128 + 20;
+		tubeRect.w = 256 - 40;
+		tubeRect.h = 10000;
+		if (tube.isUp)
 		{
-			while (SDL_PollEvent(&e) != 0)
+			tubeRect.y = tube.y - 10000;
+			if (SDL_IntersectRect(&birdRect, &tubeRect, &res))
 			{
-				if (e.type == SDL_QUIT)
-				{
-					quit = true;
-				}
+				return false;
 			}
-			Menu();
+		}
+		else
+		{
+			tubeRect.y = tube.y;
+			if (SDL_IntersectRect(&birdRect, &tubeRect, &res))
+			{
+				return false;
+			}
+		}
+	}
+	for (auto iter = std::begin(tubeList); iter != std::end(tubeList); )
+	{
+		if (iter->x < -128)
+			iter = tubeList.erase(iter);
+		else
+			++iter;
+	}
+	return bird.y < Application::Height;
+}
+
+
+int Game::exec()
+{
+	auto oldTick = SDL_GetTicks();
+	bool isSpacePressed = false;
+	for (auto done = false; !done;)
+	{
+		SDL_Event e;
+		if (SDL_PollEvent(&e))
+		{
+			switch (e.type)
+			{
+			case SDL_MOUSEBUTTONDOWN:
+				isSpacePressed = true;
+				break;
+			case SDL_MOUSEBUTTONUP:
+				isSpacePressed = false;
+				break;
+			case SDL_QUIT:
+				done = true;
+				break;
+			}
 		}
 
+		auto currentTick = SDL_GetTicks();
+		for (auto i = oldTick; i < currentTick; ++i)
+		{
+			if (!tick(isSpacePressed))
+			{
+				SDL_Delay(4000);
+				return 1;
+			}
+		}
+		oldTick = currentTick;
+
+		SDL_SetRenderDrawColor(renderer, 0x00, 0xff, 0xff, 0xff);
+		SDL_RenderClear(renderer);
+		bird.draw();
+		for (auto &tube : tubeList)
+			tube.draw();
+		drawTubeCounter();
+		SDL_RenderPresent(renderer);
 	}
-	CloseEverything();
 	return 0;
 }
+
+void Game::drawTubeCounter()
+{
+	int num = (counter - 4 * (Application::Width - bird.x)) / 2000 + 1;
+	if (num < 0)
+		num = 0;
+	SDL_Rect srcRect;
+	srcRect.y = 0;
+	srcRect.w = 34;
+	srcRect.h = 64;
+	SDL_Rect destRect;
+	destRect.x = Application::Width - 32 - 50;
+	destRect.y = 50;
+	destRect.w = 34;
+	destRect.h = 64;
+	do
+	{
+		srcRect.x = num % 10 * 34;
+		num /= 10;
+		SDL_RenderCopy(renderer, digitsTexture, &srcRect, &destRect);
+		destRect.x -= 34;
+	} while (num > 0);
+}
+
+int Run()
+{
+	Application app;
+	return app.exec();
+}
+
 void Menu()
 {
 	RenderMenu();
-	SDL_Event e;
-	while (SDL_PollEvent(&e) != 0)
+	SDL_Event e2;
+	while (SDL_PollEvent(&e2) != 0)
 	{
-		if (e.type == SDL_KEYDOWN)
+		if (e2.type == SDL_KEYDOWN)
 		{
-			switch (e.key.keysym.sym)
+			switch (e2.key.keysym.sym)
 			{
 			case SDLK_1:
 				Game();
@@ -113,29 +331,60 @@ void Menu()
 		}
 	}
 }
-void Game()
-{
-	RenderGame();
-}
 void Highscores()
 {
 	SDL_DestroyWindow(window);
 	window = NULL;
-	window3 = SDL_CreateWindow("Highscores", windowRect3.x, windowRect3.y, windowRect3.w, windowRect3.h, 0);
-	SetupRenderer3();
-	SDL_Event e;
+	SDL_RenderClear(renderer);
+	CreateWindow3();
+	SDL_Event e4;
 	bool quit = false;
 	while (!quit)
 	{
-		while (SDL_PollEvent(&e) != 0)
+		while (SDL_PollEvent(&e4) != 0)
 		{
-			if (e.type == SDL_QUIT)
+			if (e4.type == SDL_QUIT)
 			{
 				quit = true;
 			}
 		}
 		RenderHiSc();
 	}
+	CloseEverything();
+}
+void Game()
+{
+	SDL_DestroyWindow(window);
+	window = NULL;
+	if (hisc == 1)
+	{
+		SDL_DestroyWindow(window3);
+		window3 = NULL;
+	}
+	/*SDL_RenderClear(renderer);
+	CreateWindow2();
+	SDL_Event e3;
+	bool quit = false;
+	int frame = 0;
+	Timer fps;
+	while (!quit)
+	{
+	fps.start();
+	while (SDL_PollEvent(&e3) != 0)
+	{
+	if (e3.type == SDL_QUIT)
+	{
+	quit = true;
+	}
+	}
+	RenderGame();
+	frame++;
+	if (fps.get_ticks() < 1000 / FRAMES_PER_SECOND)
+	{
+	SDL_Delay((1000 / FRAMES_PER_SECOND) - fps.get_ticks());
+	}
+	}*/
+	Run();
 	CloseEverything();
 }
 void RenderMenu()
@@ -178,6 +427,20 @@ void RenderHiSc()
 			SDL_RenderCopy(renderer, hiscBT1, nullptr, &hiscBR1);
 
 			SDL_RenderPresent(renderer);
+
+			SDL_Event e5;
+			while (SDL_PollEvent(&e5) != 0)
+			{
+				if (e5.type == SDL_KEYDOWN)
+				{
+					if (e5.key.keysym.sym == SDLK_RETURN)
+					{
+						hisc = 1;
+						Game();
+						break;
+					}
+				}
+			}
 		}
 		else
 		{
@@ -234,7 +497,7 @@ void RenderHiSc()
 }
 void RenderGame()
 {
-
+	SDL_RenderPresent(renderer);
 }
 bool SetupTTF(const std::string &fontName)
 {
@@ -266,7 +529,7 @@ void CreateTextTextures()
 	blendedTexture_Title = SurfaceToTexture(blended_Title);
 
 	SDL_QueryTexture(blendedTexture_Title, NULL, NULL, &blendedRect_Title.w, &blendedRect_Title.h);
-	blendedRect_Title.x = (windowRect.w - blendedRect_Title.w)/2;
+	blendedRect_Title.x = (windowRect.w - blendedRect_Title.w) / 2;
 	blendedRect_Title.y = 75;
 
 	//Play
@@ -310,13 +573,8 @@ bool InitEverything()
 	if (!InitSDL())
 		return false;
 
-	if (!CreateWindow())
+	if (!CreateWindow1())
 		return false;
-
-	if (!CreateRenderer())
-		return false;
-
-	SetupRenderer();
 
 	if (!SetupTTF("courbd.ttf"))
 		return false;
@@ -337,48 +595,35 @@ bool InitSDL()
 	return true;
 }
 
-bool CreateWindow()
+bool CreateWindow1()
 {
 	window = SDL_CreateWindow("Flappy Bird", windowRect.x, windowRect.y, windowRect.w, windowRect.h, 0);
-
-	if (window == nullptr)
-	{
-		cout << "Failed to create window : " << SDL_GetError();
-		return false;
-	}
-
-	return true;
-}
-
-bool CreateRenderer()
-{
 	renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-
-	if (renderer == nullptr)
-	{
-		cout << "Failed to create renderer : " << SDL_GetError();
-		return false;
-	}
-
-	return true;
-}
-
-void SetupRenderer()
-{
 	SDL_RenderSetLogicalSize(renderer, windowRect.w, windowRect.h);
 	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+
+	if (window == nullptr || renderer == nullptr)
+	{
+		cout << "Failed: " << SDL_GetError();
+		return false;
+	}
+
+	return true;
 }
-void SetupRenderer2()
+bool CreateWindow3()
 {
-	renderer = SDL_CreateRenderer(window2, -1, SDL_RENDERER_ACCELERATED);
-	SDL_RenderSetLogicalSize(renderer, windowRect2.w, windowRect2.h);
-	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-}
-void SetupRenderer3()
-{
+	window3 = SDL_CreateWindow("Highscores", windowRect3.x, windowRect3.y, windowRect3.w, windowRect3.h, 0);
 	renderer = SDL_CreateRenderer(window3, -1, SDL_RENDERER_ACCELERATED);
 	SDL_RenderSetLogicalSize(renderer, windowRect3.w, windowRect3.h);
 	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+
+	if (window3 == nullptr || renderer == nullptr)
+	{
+		cout << "Failed: " << SDL_GetError();
+		return false;
+	}
+
+	return true;
 }
 void CloseEverything()
 {
@@ -391,4 +636,31 @@ void CloseEverything()
 	TTF_CloseFont(font_Title);
 	TTF_CloseFont(font_Options);
 	SDL_Quit();
+}
+
+int main(int argc, char* args[])
+{
+	if (!InitEverything())
+	{
+		cout << "ERROR" << '\n';
+	}
+	else
+	{
+		bool quit = false;
+		SDL_Event e;
+		while (!quit)
+		{
+			while (SDL_PollEvent(&e) != 0)
+			{
+				if (e.type == SDL_QUIT)
+				{
+					quit = true;
+				}
+			}
+			Menu();
+		}
+
+	}
+	CloseEverything();
+	return 0;
 }
