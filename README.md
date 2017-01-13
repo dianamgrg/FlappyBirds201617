@@ -1,0 +1,4 @@
+# FlappyBirds201617
+SDL2
+SDL2 TTF
+SDL2 IMAGE
